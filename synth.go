@@ -54,7 +54,7 @@ func startFluidSynth(soundFont string) (*FluidSynth, error) {
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.Command("fluidsynth", "-q", "-s", "-g", "1.0", filepath.Clean(sf))
+	cmd := exec.Command("fluidsynth", fluidSynthArgs(sf)...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -71,6 +71,14 @@ func startFluidSynth(soundFont string) (*FluidSynth, error) {
 		return nil, err
 	}
 	return f, nil
+}
+
+func fluidSynthArgs(soundFont string) []string {
+	// Commands are sent through FluidSynth's stdin shell, so its MIDI server
+	// (-s) is neither needed nor desirable: enabling it probes the ALSA
+	// sequencer and opens a server socket. PulseAudio also works through
+	// pipewire-pulse on current Linux desktops and avoids assuming ALSA card 0.
+	return []string{"-q", "-a", "pulseaudio", "-g", "1.0", filepath.Clean(soundFont)}
 }
 
 func (f *FluidSynth) command(format string, args ...any) error {
