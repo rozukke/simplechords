@@ -75,10 +75,18 @@ func startFluidSynth(soundFont string) (*FluidSynth, error) {
 
 func fluidSynthArgs(soundFont string) []string {
 	// Commands are sent through FluidSynth's stdin shell, so its MIDI server
-	// (-s) is neither needed nor desirable: enabling it probes the ALSA
-	// sequencer and opens a server socket. PulseAudio also works through
-	// pipewire-pulse on current Linux desktops and avoids assuming ALSA card 0.
-	return []string{"-q", "-a", "pulseaudio", "-g", "1.0", filepath.Clean(soundFont)}
+	// and MIDI input (-n) is disabled. This avoids probing the ALSA sequencer.
+	// PulseAudio also works through pipewire-pulse on current Linux desktops.
+	// Normal scheduling is sufficient here and avoids harmless high-priority
+	// warnings on systems that do not grant realtime scheduling privileges.
+	return []string{
+		"-q",
+		"-n",
+		"-a", "pulseaudio",
+		"-o", "audio.realtime-prio=0",
+		"-g", "1.0",
+		filepath.Clean(soundFont),
+	}
 }
 
 func (f *FluidSynth) command(format string, args ...any) error {
