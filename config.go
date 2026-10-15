@@ -144,7 +144,7 @@ func reorderCLIArgs(args []string) []string {
 
 		flags = append(flags, arg)
 		name := strings.TrimLeft(arg, "-")
-		name, hasValue := strings.Cut(name, "=")
+		name, _, hasValue := strings.Cut(name, "=")
 		if valueFlags[name] && !hasValue && i+1 < len(args) {
 			i++
 			flags = append(flags, args[i])
