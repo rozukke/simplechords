@@ -122,6 +122,37 @@ func parseOnOff(s string) (bool, error) {
 	}
 }
 
+// reorderCLIArgs permits options on either side of the optional song file. The
+// standard flag package stops parsing at its first positional argument, while
+// commands such as "simplechords song.chords --tempo 100" are expected to work.
+func reorderCLIArgs(args []string) []string {
+	valueFlags := map[string]bool{
+		"tempo": true, "rhythm": true, "repeat": true, "count-in": true,
+		"metronome": true, "chords": true, "soundfont": true,
+	}
+	var flags, positional []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			positional = append(positional, args[i+1:]...)
+			return append(append(flags, "--"), positional...)
+		}
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			positional = append(positional, arg)
+			continue
+		}
+
+		flags = append(flags, arg)
+		name := strings.TrimLeft(arg, "-")
+		name, hasValue := strings.Cut(name, "=")
+		if valueFlags[name] && !hasValue && i+1 < len(args) {
+			i++
+			flags = append(flags, args[i])
+		}
+	}
+	return append(flags, positional...)
+}
+
 func parseCLI(args []string) (Song, error) {
 	fs := flag.NewFlagSet("simplechords", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -132,7 +163,7 @@ func parseCLI(args []string) (Song, error) {
 	metronome := fs.String("metronome", "", "on or off")
 	chords := fs.String("chords", "", "bar-grid chord progression")
 	soundfont := fs.String("soundfont", "", "path to a SoundFont")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderCLIArgs(args)); err != nil {
 		return Song{}, err
 	}
 	if len(fs.Args()) > 1 {

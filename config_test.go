@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -34,14 +36,27 @@ func TestParseFileRejectsUnknownKey(t *testing.T) {
 	}
 }
 
-func TestCLIOverridesFileValues(t *testing.T) {
-	// This behavior is covered at the flag merge level without creating a file:
-	// explicit CLI-only values must produce a complete song.
+func TestCLIParsesOptions(t *testing.T) {
 	song, err := parseCLI([]string{"--tempo", "120", "--rhythm", "eighths", "--repeat", "2", "--count-in", "0", "--metronome", "off", "--chords", "| C | G |"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if song.Tempo != 120 || song.Rhythm != "eighths" || song.Repeat != 2 || song.CountIn != 0 || song.Metronome {
 		t.Fatalf("unexpected song: %+v", song)
+	}
+}
+
+func TestCLIFlagsAfterFileOverrideFileValues(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "song.chords")
+	if err := os.WriteFile(path, []byte("tempo 90\nrhythm folk\nrepeat 2\ncount-in 2\nmetronome on\nchords | C | G |\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	song, err := parseCLI([]string{path, "--tempo", "120", "--repeat=4", "--count-in", "0", "--metronome", "off"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if song.Tempo != 120 || song.Rhythm != "folk" || song.Repeat != 4 || song.CountIn != 0 || song.Metronome {
+		t.Fatalf("file settings were not overridden: %+v", song)
 	}
 }

@@ -26,6 +26,9 @@ Play the included example:
 
 ```sh
 ./simplechords example.chords
+
+# Override a setting from the song file for this playback.
+./simplechords example.chords --tempo 100
 ```
 
 Or create a progression directly:
