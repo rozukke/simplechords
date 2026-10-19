@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -19,10 +20,56 @@ type Synth interface {
 }
 
 type FluidSynth struct {
-	cmd   *exec.Cmd
-	stdin io.WriteCloser
-	w     *bufio.Writer
-	mu    sync.Mutex
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	w      *bufio.Writer
+	stderr *fluidSynthLogWriter
+	mu     sync.Mutex
+}
+
+// fluidSynthLogWriter keeps the terminal UI clean without hiding diagnostics.
+// FluidSynth writes its normal driver banner to stderr, so discard just that
+// known informational line and pass warnings and errors through unchanged.
+type fluidSynthLogWriter struct {
+	target  io.Writer
+	pending []byte
+	mu      sync.Mutex
+}
+
+func (w *fluidSynthLogWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.pending = append(w.pending, p...)
+	w.writeCompleteLines()
+	return len(p), nil
+}
+
+func (w *fluidSynthLogWriter) Flush() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.pending) > 0 {
+		w.writeLine(w.pending)
+		w.pending = nil
+	}
+}
+
+func (w *fluidSynthLogWriter) writeCompleteLines() {
+	for {
+		i := bytes.IndexByte(w.pending, '\n')
+		if i < 0 {
+			return
+		}
+		w.writeLine(w.pending[:i+1])
+		w.pending = w.pending[i+1:]
+	}
+}
+
+func (w *fluidSynthLogWriter) writeLine(line []byte) {
+	trimmed := bytes.TrimSpace(line)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("fluidsynth: Using PulseAudio driver")) {
+		return
+	}
+	_, _ = w.target.Write(line)
 }
 
 func findSoundFont(explicit string) (string, error) {
@@ -59,12 +106,15 @@ func startFluidSynth(soundFont string) (*FluidSynth, error) {
 	if err != nil {
 		return nil, err
 	}
+	// FluidSynth logs its driver banner to stderr even in quiet mode. Filter
+	// that one benign line, while retaining errors for the user.
+	stderr := &fluidSynthLogWriter{target: os.Stderr}
 	cmd.Stdout = io.Discard
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start fluidsynth: %w", err)
 	}
-	f := &FluidSynth{cmd: cmd, stdin: stdin, w: bufio.NewWriter(stdin)}
+	f := &FluidSynth{cmd: cmd, stdin: stdin, w: bufio.NewWriter(stdin), stderr: stderr}
 	// General MIDI program 25 (zero-based) is steel-string guitar.
 	if err := f.command("prog 0 25"); err != nil {
 		f.Close()
@@ -123,11 +173,13 @@ func (f *FluidSynth) Close() error {
 	_ = f.stdin.Close()
 	done := make(chan error, 1)
 	go func() { done <- f.cmd.Wait() }()
+	var err error
 	select {
-	case err := <-done:
-		return err
+	case err = <-done:
 	case <-time.After(time.Second):
 		_ = f.cmd.Process.Kill()
-		return <-done
+		err = <-done
 	}
+	f.stderr.Flush()
+	return err
 }

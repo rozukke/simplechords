@@ -1,9 +1,21 @@
 package main
 
 import (
+	"bytes"
 	"slices"
 	"testing"
 )
+
+func TestFluidSynthLogWriterFiltersOnlyDriverBanner(t *testing.T) {
+	var output bytes.Buffer
+	writer := &fluidSynthLogWriter{target: &output}
+	_, _ = writer.Write([]byte("fluidsynth: Using Pulse"))
+	_, _ = writer.Write([]byte("Audio driver\nfluidsynth: error: failed to open audio\n"))
+	writer.Flush()
+	if got, want := output.String(), "fluidsynth: error: failed to open audio\n"; got != want {
+		t.Fatalf("logged output = %q, want %q", got, want)
+	}
+}
 
 func TestFluidSynthUsesPulseWithoutMIDIServer(t *testing.T) {
 	args := fluidSynthArgs("/tmp/guitar.sf2")
