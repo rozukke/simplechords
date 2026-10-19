@@ -11,6 +11,7 @@ func TestParseFile(t *testing.T) {
 	cfg, err := parseFile(strings.NewReader(`
 # practice tune
 tempo 90
+time 3/4
 rhythm folk # trailing comment
 repeat 3
 count-in 2
@@ -21,7 +22,7 @@ chords | Am*2 |
 	if err != nil {
 		t.Fatal(err)
 	}
-	if *cfg.tempo != 90 || *cfg.rhythm != "folk" || *cfg.repeat != 3 || *cfg.countIn != 2 || *cfg.metronome {
+	if *cfg.tempo != 90 || *cfg.time != "3/4" || *cfg.rhythm != "folk" || *cfg.repeat != 3 || *cfg.countIn != 2 || *cfg.metronome {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
 	if got := strings.Join(cfg.chordLines, " "); got != "| C# | F G | | Am*2 |" {
@@ -37,11 +38,11 @@ func TestParseFileRejectsUnknownKey(t *testing.T) {
 }
 
 func TestCLIParsesOptions(t *testing.T) {
-	song, err := parseCLI([]string{"--tempo", "120", "--rhythm", "eighths", "--repeat", "2", "--count-in", "0", "--metronome", "off", "--chords", "| C | G |"})
+	song, err := parseCLI([]string{"--tempo", "120", "--time", "3/4", "--rhythm", "eighths", "--repeat", "2", "--count-in", "0", "--metronome", "off", "--chords", "| C | G |"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if song.Tempo != 120 || song.Rhythm != "eighths" || song.Repeat != 2 || song.CountIn != 0 || song.Metronome {
+	if song.Tempo != 120 || song.TimeSignature != "3/4" || song.Rhythm != "eighths" || song.Repeat != 2 || song.CountIn != 0 || song.Metronome {
 		t.Fatalf("unexpected song: %+v", song)
 	}
 }

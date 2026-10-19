@@ -176,9 +176,10 @@ func (t *Transport) run() {
 				paused = !paused
 			case seekBars:
 				_ = t.synth.AllNotesOff()
+				songStart := t.seq.LeadInDuration + t.seq.CountInDuration
 				bar := -1
-				if position >= t.seq.CountInDuration {
-					bar = int((position - t.seq.CountInDuration) / t.seq.BarDuration)
+				if position >= songStart {
+					bar = int((position - songStart) / t.seq.BarDuration)
 				}
 				bar += cmd.amount
 				if bar < 0 {
@@ -187,7 +188,7 @@ func (t *Transport) run() {
 				if bar >= t.seq.Bars {
 					bar = t.seq.Bars - 1
 				}
-				setPosition(t.seq.CountInDuration + time.Duration(bar)*t.seq.BarDuration)
+				setPosition(songStart + time.Duration(bar)*t.seq.BarDuration)
 			case restart:
 				_ = t.synth.AllNotesOff()
 				paused = false
@@ -206,24 +207,31 @@ func (t *Transport) run() {
 
 func (t *Transport) snapshot(position time.Duration, paused bool, playErr error) Snapshot {
 	s := Snapshot{Playing: !paused, Paused: paused, Position: position, Total: t.seq.SongDuration, Err: playErr, Chord: "-"}
-	if position < t.seq.CountInDuration {
+	songStart := t.seq.LeadInDuration + t.seq.CountInDuration
+	if position < songStart {
 		s.InCountIn = true
-		s.CountInBar = int(position/t.seq.BarDuration) + 1
-		s.Beat = int((position%t.seq.BarDuration)/t.seq.BeatDuration) + 1
+		if position < t.seq.LeadInDuration {
+			// The pre-roll lets the synth start before count-in beat one.
+			s.CountInBar, s.Beat = 1, 1
+			return s
+		}
+		countInPos := position - t.seq.LeadInDuration
+		s.CountInBar = int(countInPos/t.seq.BarDuration) + 1
+		s.Beat = int((countInPos%t.seq.BarDuration)/t.seq.BeatDuration) + 1
 		return s
 	}
-	songPos := position - t.seq.CountInDuration
+	songPos := position - songStart
 	if songPos > t.seq.SongDuration {
 		songPos = t.seq.SongDuration
 	}
 	s.SongPosition = songPos
 	beat := float64(songPos) / float64(t.seq.BeatDuration)
-	bar := int(beat / 4)
+	bar := int(beat / float64(t.seq.BeatsPerBar))
 	if bar >= t.seq.Bars {
 		bar = t.seq.Bars - 1
 	}
 	s.Bar = bar + 1
-	s.Beat = int(beat-float64(bar*4)) + 1
+	s.Beat = int(beat-float64(bar*t.seq.BeatsPerBar)) + 1
 	s.Repeat = bar/t.seq.BarsPerPass + 1
 	if span, ok := spanAt(t.seq.Spans, beat); ok {
 		s.Chord = span.Symbol

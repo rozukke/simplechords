@@ -14,13 +14,14 @@ import (
 const defaultRhythm = "quarters"
 
 type Song struct {
-	Tempo     int
-	Rhythm    string
-	Repeat    int
-	CountIn   int
-	Metronome bool
-	Bars      []Bar
-	SoundFont string
+	Tempo         int
+	TimeSignature string
+	Rhythm        string
+	Repeat        int
+	CountIn       int
+	Metronome     bool
+	Bars          []Bar
+	SoundFont     string
 }
 
 type Bar struct {
@@ -35,6 +36,7 @@ type TimedChord struct {
 
 type fileConfig struct {
 	tempo      *int
+	time       *string
 	rhythm     *string
 	repeat     *int
 	countIn    *int
@@ -43,7 +45,7 @@ type fileConfig struct {
 }
 
 func defaultSong() Song {
-	return Song{Tempo: 100, Rhythm: defaultRhythm, Repeat: 1, CountIn: 1, Metronome: true}
+	return Song{Tempo: 100, TimeSignature: "4/4", Rhythm: defaultRhythm, Repeat: 1, CountIn: 1, Metronome: true}
 }
 
 func parseFile(r io.Reader) (fileConfig, error) {
@@ -66,6 +68,11 @@ func parseFile(r io.Reader) (fileConfig, error) {
 				return cfg, fmt.Errorf("line %d: invalid tempo %q", lineNo, value)
 			}
 			cfg.tempo = &v
+		case "time":
+			if _, err := parseTimeSignature(value); err != nil {
+				return cfg, fmt.Errorf("line %d: %w", lineNo, err)
+			}
+			cfg.time = &value
 		case "rhythm":
 			cfg.rhythm = &value
 		case "repeat":
@@ -127,7 +134,7 @@ func parseOnOff(s string) (bool, error) {
 // commands such as "simplechords song.chords --tempo 100" are expected to work.
 func reorderCLIArgs(args []string) []string {
 	valueFlags := map[string]bool{
-		"tempo": true, "rhythm": true, "repeat": true, "count-in": true,
+		"tempo": true, "time": true, "rhythm": true, "repeat": true, "count-in": true,
 		"metronome": true, "chords": true, "soundfont": true,
 	}
 	var flags, positional []string
@@ -157,6 +164,7 @@ func parseCLI(args []string) (Song, error) {
 	fs := flag.NewFlagSet("simplechords", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	tempo := fs.Int("tempo", 0, "tempo in BPM")
+	timeSignature := fs.String("time", "", "time signature, e.g. 3/4")
 	rhythm := fs.String("rhythm", "", "rhythm preset or D/U/. grid")
 	repeat := fs.Int("repeat", 0, "number of passes")
 	countIn := fs.Int("count-in", -1, "count-in bars")
@@ -185,6 +193,9 @@ func parseCLI(args []string) (Song, error) {
 		if cfg.tempo != nil {
 			song.Tempo = *cfg.tempo
 		}
+		if cfg.time != nil {
+			song.TimeSignature = *cfg.time
+		}
 		if cfg.rhythm != nil {
 			song.Rhythm = *cfg.rhythm
 		}
@@ -203,6 +214,9 @@ func parseCLI(args []string) (Song, error) {
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
 	if set["tempo"] {
 		song.Tempo = *tempo
+	}
+	if set["time"] {
+		song.TimeSignature = *timeSignature
 	}
 	if set["rhythm"] {
 		song.Rhythm = *rhythm
@@ -230,7 +244,11 @@ func parseCLI(args []string) (Song, error) {
 		song.SoundFont = os.Getenv("SOUNDFONT")
 	}
 
-	bars, err := parseChordGrid(chordText)
+	meter, err := parseTimeSignature(song.TimeSignature)
+	if err != nil {
+		return Song{}, err
+	}
+	bars, err := parseChordGridForMeter(chordText, meter.BeatsPerBar)
 	if err != nil {
 		return Song{}, err
 	}
@@ -251,6 +269,9 @@ func validateSong(s Song) error {
 	if s.CountIn < 0 || s.CountIn > 4 {
 		return fmt.Errorf("count-in must be between 0 and 4 bars")
 	}
+	if _, err := parseTimeSignature(s.TimeSignature); err != nil {
+		return err
+	}
 	if _, err := rhythmPattern(s.Rhythm); err != nil {
 		return err
 	}
@@ -267,6 +288,7 @@ func usage(w io.Writer) {
 
 Options:
   --tempo BPM          tempo (default 100)
+  --time N/D           time signature (default 4/4)
   --rhythm PATTERN     whole, quarters, eighths, folk, or a 4/8/16-slot D/U/. grid
   --repeat N           progression passes (default 1)
   --count-in N         count-in bars, 0-4 (default 1)

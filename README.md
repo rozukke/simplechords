@@ -17,6 +17,10 @@ Playback uses FluidSynth and a General MIDI SoundFont. On Debian or Ubuntu:
 sudo apt install fluidsynth fluid-soundfont-gm
 ```
 
+FluidSynth outputs through PulseAudio. This also works on the usual modern
+PipeWire desktop through `pipewire-pulse`; it does not require an ALSA MIDI
+sequencer device or realtime scheduling privileges.
+
 If your SoundFont is not in a standard Debian/Ubuntu location, pass
 `--soundfont /path/to/file.sf2` or set `SOUNDFONT`.
 
@@ -42,6 +46,7 @@ A song file is plain text:
 
 ```text
 tempo 90
+time 4/4
 rhythm folk
 repeat 4
 count-in 1
@@ -56,10 +61,15 @@ trailing comments are ignored.
 ## Notation
 
 Bars are enclosed by `|`. One chord fills a bar; multiple chords split it
-evenly. A chord alone may use `*N` to last several bars:
+evenly. Add `(N/D)` after a chord to assign it that fraction of its bar; the
+remaining unannotated chords split whatever remains. For example,
+`| C(2/3) G |` gives `C` two-thirds of the bar and `G` one-third. Explicit
+fractions must be positive shares no larger than a whole bar and, when every
+chord has one, must total exactly one bar. A chord alone may use `*N` to last
+several bars:
 
 ```text
-chords | C | Am F | G*2 |
+chords | C | Am F | C(2/3) G | G*2 |
 ```
 
 Supported chord qualities are major, minor, dominant seventh, major seventh,
@@ -75,8 +85,18 @@ and `.` lets the previous chord ring:
 rhythm D.DU.UDU
 ```
 
-The progression is always in 4/4. `repeat` determines the total number of
-passes. The count-in is audible even if the playback metronome is disabled.
+Set the meter with `time N/D` (or `--time N/D`); it defaults to `4/4`:
+
+```text
+time 3/4
+rhythm D...  # one down-strum, ringing for the full 3/4 bar
+```
+
+Rhythm grids always divide the complete bar, so the same 4-, 8-, or 16-slot
+notation works in every meter. Tempo is quarter-note BPM, so the time
+signature denominator determines each metronome beat's duration. `repeat`
+determines the total number of passes. The count-in is audible even if the
+playback metronome is disabled.
 
 ## Controls
 

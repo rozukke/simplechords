@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math/big"
 	"regexp"
 	"strconv"
 	"strings"
@@ -72,7 +73,34 @@ func guitarVoicing(ch ParsedChord) []uint8 {
 	return voices
 }
 
+type TimeSignature struct {
+	BeatsPerBar int
+	BeatUnit    int
+}
+
+func parseTimeSignature(value string) (TimeSignature, error) {
+	parts := strings.Split(strings.TrimSpace(value), "/")
+	if len(parts) != 2 {
+		return TimeSignature{}, fmt.Errorf("time signature must be N/D, got %q", value)
+	}
+	numerator, err := strconv.Atoi(parts[0])
+	if err != nil || numerator < 1 || numerator > 32 {
+		return TimeSignature{}, fmt.Errorf("time signature numerator must be between 1 and 32")
+	}
+	denominator, err := strconv.Atoi(parts[1])
+	if err != nil || (denominator != 1 && denominator != 2 && denominator != 4 && denominator != 8 && denominator != 16) {
+		return TimeSignature{}, fmt.Errorf("time signature denominator must be 1, 2, 4, 8, or 16")
+	}
+	return TimeSignature{BeatsPerBar: numerator, BeatUnit: denominator}, nil
+}
+
 func parseChordGrid(text string) ([]Bar, error) {
+	return parseChordGridForMeter(text, 4)
+}
+
+var chordDurationRE = regexp.MustCompile(`^(.+?)\(([0-9]+)/([0-9]+)\)$`)
+
+func parseChordGridForMeter(text string, beatsPerBar int) ([]Bar, error) {
 	if strings.TrimSpace(text) == "" {
 		return nil, fmt.Errorf("no chord grid supplied")
 	}
@@ -84,9 +112,6 @@ func parseChordGrid(text string) ([]Bar, error) {
 			continue
 		}
 		tokens := strings.Fields(raw)
-		if len(tokens) == 0 {
-			continue
-		}
 		if len(tokens) == 1 && strings.Contains(tokens[0], "*") {
 			symbol, countText, ok := strings.Cut(tokens[0], "*")
 			if !ok || strings.Contains(countText, "*") {
@@ -101,26 +126,61 @@ func parseChordGrid(text string) ([]Bar, error) {
 				return nil, err
 			}
 			for i := 0; i < count; i++ {
-				bars = append(bars, Bar{Chords: []TimedChord{{Symbol: ch.Symbol, Beats: 4}}})
+				bars = append(bars, Bar{Chords: []TimedChord{{Symbol: ch.Symbol, Beats: float64(beatsPerBar)}}})
 			}
 			continue
 		}
-		for _, token := range tokens {
+		if len(tokens) == 0 {
+			continue
+		}
+		if len(tokens) > 32 {
+			return nil, fmt.Errorf("a bar may contain at most 32 chords")
+		}
+
+		shares := make([]*big.Rat, len(tokens))
+		explicitTotal := new(big.Rat)
+		unspecified := 0
+		for i, token := range tokens {
 			if strings.Contains(token, "*") {
 				return nil, fmt.Errorf("%q: *N is only valid for a chord alone in its bar", token)
 			}
+			if match := chordDurationRE.FindStringSubmatch(token); match != nil {
+				numerator, _ := strconv.Atoi(match[2])
+				denominator, _ := strconv.Atoi(match[3])
+				if numerator < 1 || denominator < 1 || numerator > denominator {
+					return nil, fmt.Errorf("invalid chord duration %q", token)
+				}
+				shares[i] = big.NewRat(int64(numerator), int64(denominator))
+				explicitTotal.Add(explicitTotal, shares[i])
+				tokens[i] = match[1]
+			} else {
+				unspecified++
+			}
 		}
-		if len(tokens) > 4 {
-			return nil, fmt.Errorf("a bar may contain at most four chords")
+		one := big.NewRat(1, 1)
+		if explicitTotal.Cmp(one) > 0 || (unspecified == 0 && explicitTotal.Cmp(one) != 0) {
+			return nil, fmt.Errorf("chord durations must fill exactly one bar")
 		}
-		beatLen := 4.0 / float64(len(tokens))
+		if unspecified > 0 {
+			remaining := new(big.Rat).Sub(one, explicitTotal)
+			share := new(big.Rat).Quo(remaining, big.NewRat(int64(unspecified), 1))
+			for i := range shares {
+				if shares[i] == nil {
+					shares[i] = share
+				}
+			}
+		}
 		bar := Bar{}
+		start := 0.0
 		for i, token := range tokens {
 			ch, err := parseChord(token)
 			if err != nil {
 				return nil, err
 			}
-			bar.Chords = append(bar.Chords, TimedChord{Symbol: ch.Symbol, StartBeat: float64(i) * beatLen, Beats: beatLen})
+			beats, _ := shares[i].Float64()
+			beats *= float64(beatsPerBar)
+			bar.Chords = append(bar.Chords, TimedChord{Symbol: ch.Symbol, StartBeat: start, Beats: beats})
+			start += beats
 		}
 		bars = append(bars, bar)
 	}
@@ -132,7 +192,7 @@ func parseChordGrid(text string) ([]Bar, error) {
 
 func rhythmPattern(name string) (string, error) {
 	presets := map[string]string{
-		"whole": "D...", "quarters": "DDDD", "eighths": "DUDUDUDU", "folk": "D.DU.UDU",
+		"whole": "D...", "half": "D.D.", "quarters": "DDDD", "eighths": "DUDUDUDU", "folk": "D.DU.UDU",
 	}
 	pattern := strings.ToUpper(strings.TrimSpace(name))
 	if p, ok := presets[strings.ToLower(pattern)]; ok {
